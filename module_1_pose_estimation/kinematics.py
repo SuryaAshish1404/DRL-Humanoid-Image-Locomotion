@@ -1,5 +1,4 @@
 # task1_3_multipeople.py
-
 import cv2
 import numpy as np
 import mediapipe as mp
