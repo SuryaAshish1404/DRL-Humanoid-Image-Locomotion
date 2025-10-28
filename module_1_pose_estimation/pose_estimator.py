@@ -62,7 +62,7 @@ def multi_person_skeletons(image_bgr):
 
 # --- Test the pipeline ---
 if __name__ == "__main__":
-    img_path = "data/image_3.png"  # adjust your path
+    img_path = "../data/image_3.png"  # adjust your path
     img_rgb = load_image_rgb(img_path)
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 

@@ -3,14 +3,35 @@ import numpy as np
 from PIL import Image
 import os  # for robust path handling
 
+import cv2
+import numpy as np # <-- You need this import!
+
 def load_image_cv(path):
-    """
-    Load an image from a file path using OpenCV and return as a NumPy array (BGR).
-    """
-    img = cv2.imread(path)
-    if img is None:
-        raise FileNotFoundError(f"Image not found: {path}")
-    return img
+    # --- The Unicode-Safe Fix ---
+    
+    # 1. Read the file into a NumPy array (buffer) using Python's standard path handling
+    # The 'rb' flag means read in binary mode.
+    try:
+        with open(path, 'rb') as f:
+            file_data = f.read()
+        
+        # Convert the binary data to a NumPy array
+        np_arr = np.frombuffer(file_data, np.uint8)
+        
+    except Exception as e:
+        # Handle cases where the file itself can't be opened/read by Python
+        raise FileNotFoundError(f"Failed to read image buffer: {path}. Error: {e}")
+
+    # 2. Decode the NumPy array buffer using OpenCV
+    # cv2.IMREAD_COLOR ensures it's loaded in BGR format
+    img_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+
+    # 3. Check for successful decoding
+    if img_bgr is None:
+        # This handles cases where the file exists but isn't a valid image format
+        raise FileNotFoundError(f"Image not found or could not be decoded: {path}")
+
+    return img_bgr
 
 def load_image_rgb(path):
     """
