@@ -1,4 +1,3 @@
-# task1_3_multipeople.py
 import cv2
 import numpy as np
 import mediapipe as mp
@@ -10,35 +9,54 @@ yolo_model = YOLO("yolov8n.pt")  # YOLOv8 tiny for fast person detection
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5)
 
+# --- Useful keypoint indices (25 main ones from 33) ---
+# Based on COCO-like subset (remove face & feet extras)
+MAIN_LANDMARKS = [
+    0,   # nose
+    11, 12,  # shoulders
+    13, 14,  # elbows
+    15, 16,  # wrists
+    23, 24,  # hips
+    25, 26,  # knees
+    27, 28,  # ankles
+    5, 6,    # eyes
+    7, 8,    # ears
+    9, 10,   # mouth corners (optional upper face)
+    17, 18,  # index fingers
+    19, 20,  # pinky fingers
+    21, 22   # thumbs
+]
+
 
 # --- Functions ---
 
 def extract_skeleton(image_rgb):
     """
-    Extract a single person's 33 keypoints [x, y, visibility] using MediaPipe.
+    Extract selected 25 keypoints [x, y, visibility] using MediaPipe.
     """
     results = pose.process(image_rgb)
     skeleton = []
 
     if results.pose_landmarks:
-        for lm in results.pose_landmarks.landmark:
-            skeleton.append([lm.x, lm.y, lm.visibility])
+        for idx, lm in enumerate(results.pose_landmarks.landmark):
+            if idx in MAIN_LANDMARKS:
+                skeleton.append([lm.x, lm.y, lm.visibility])
         skeleton = np.array(skeleton)
     else:
-        skeleton = np.zeros((33, 3))  # fallback if no pose detected
+        skeleton = np.zeros((len(MAIN_LANDMARKS), 3))  # fallback
 
     return skeleton
 
 
 def multi_person_skeletons(image_bgr):
     """
-    Detect multiple people using YOLO and return list of skeletons [num_people, 33, 3].
+    Detect multiple people using YOLO and return list of reduced skeletons [num_people, 25, 3].
     """
-    results = yolo_model(image_bgr)[0]  # YOLO detections
+    results = yolo_model(image_bgr)[0]
     skeletons = []
 
     for box, cls in zip(results.boxes.xyxy, results.boxes.cls):
-        if int(cls) != 0:  # only class 0 = person
+        if int(cls) != 0:  # only person
             continue
 
         x1, y1, x2, y2 = map(int, box)
@@ -47,7 +65,6 @@ def multi_person_skeletons(image_bgr):
         if person_crop.size == 0:
             continue
 
-        # Convert to RGB for MediaPipe
         person_rgb = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
         sk = extract_skeleton(person_rgb)
 
@@ -93,21 +110,24 @@ def vector_angle(p1, p2):
 
 def compute_joint_angles(skeleton):
     """
-    Convert skeleton (33,3) to humanoid joint angles (θ_init).
-    Example includes legs and right arm.
+    Convert reduced skeleton (25,3) to humanoid joint angles (θ_init).
+    Using mapped indices for MediaPipe subset.
     """
+    # Mapping since we reduced points — use original indices for reference
+    mp_idx = mp_pose.PoseLandmark
+
     # Right leg
-    R_HIP, R_KNEE, R_ANKLE = mp_pose.PoseLandmark.RIGHT_HIP.value, mp_pose.PoseLandmark.RIGHT_KNEE.value, mp_pose.PoseLandmark.RIGHT_ANKLE.value
+    R_HIP, R_KNEE, R_ANKLE = MAIN_LANDMARKS.index(mp_idx.RIGHT_HIP.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_KNEE.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_ANKLE.value)
     θ_hip_r = vector_angle(skeleton[R_HIP], skeleton[R_KNEE])
     θ_knee_r = vector_angle(skeleton[R_KNEE], skeleton[R_ANKLE]) - θ_hip_r
 
     # Left leg
-    L_HIP, L_KNEE, L_ANKLE = mp_pose.PoseLandmark.LEFT_HIP.value, mp_pose.PoseLandmark.LEFT_KNEE.value, mp_pose.PoseLandmark.LEFT_ANKLE.value
+    L_HIP, L_KNEE, L_ANKLE = MAIN_LANDMARKS.index(mp_idx.LEFT_HIP.value), MAIN_LANDMARKS.index(mp_idx.LEFT_KNEE.value), MAIN_LANDMARKS.index(mp_idx.LEFT_ANKLE.value)
     θ_hip_l = vector_angle(skeleton[L_HIP], skeleton[L_KNEE])
     θ_knee_l = vector_angle(skeleton[L_KNEE], skeleton[L_ANKLE]) - θ_hip_l
 
     # Right arm
-    R_SHOULDER, R_ELBOW, R_WRIST = mp_pose.PoseLandmark.RIGHT_SHOULDER.value, mp_pose.PoseLandmark.RIGHT_ELBOW.value, mp_pose.PoseLandmark.RIGHT_WRIST.value
+    R_SHOULDER, R_ELBOW, R_WRIST = MAIN_LANDMARKS.index(mp_idx.RIGHT_SHOULDER.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_ELBOW.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_WRIST.value)
     θ_shoulder_r = vector_angle(skeleton[R_SHOULDER], skeleton[R_ELBOW])
     θ_elbow_r = vector_angle(skeleton[R_ELBOW], skeleton[R_WRIST]) - θ_shoulder_r
 
@@ -118,15 +138,30 @@ def compute_joint_angles(skeleton):
 # --- Main pipeline ---
 
 if __name__ == "__main__":
-    img_path = "../data/image_3.png"  # adjust path
+    import os
+    import cv2
+    import numpy as np
+    from image_io import load_image_rgb
+
+    img_path = "../data/isl_11.jpg"
     img_rgb = load_image_rgb(img_path)
+
+    # --- Detect if the image is truly grayscale ---
+    if np.allclose(img_rgb[:, :, 0], img_rgb[:, :, 1], atol=2) and np.allclose(img_rgb[:, :, 1], img_rgb[:, :, 2], atol=2):
+        print("⚙️ Detected grayscale image – enhancing contrast for better detection.")
+        gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+        img_rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    else:
+        print("Detected color image – skipping grayscale enhancement.")
+
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
-    # Detect multiple people
+    # --- Perform detection ---
     skeletons = multi_person_skeletons(img_bgr)
     print(f"Detected {len(skeletons)} people")
 
-    # Select main skeleton
     main_skeleton = select_main_skeleton(skeletons)
     if main_skeleton is None:
         print("No person detected!")
@@ -134,10 +169,18 @@ if __name__ == "__main__":
         θ_init = compute_joint_angles(main_skeleton)
         print("Initial Pose Vector θ_init:", θ_init)
 
-        # Optional: visualize main skeleton
+        # --- Visualization ---
         for x, y, _ in main_skeleton:
             cv2.circle(img_bgr, (int(x), int(y)), 3, (0, 255, 0), -1)
 
-        cv2.imshow("Main Person Skeleton", img_bgr)
+        # --- Save output image in ../outputs ---
+        os.makedirs("../outputs", exist_ok=True)
+        base_name = os.path.splitext(os.path.basename(img_path))[0]
+        output_path = os.path.join("../outputs", f"{base_name}_kinematics_output.jpg")
+        cv2.imwrite(output_path, img_bgr)
+        print(f"✅ Output image saved as: {output_path}")
+
+        # --- Optional display ---
+        # cv2.imshow("Main Person Skeleton (Reduced)", img_bgr)
         cv2.waitKey(0)
         cv2.destroyAllWindows()

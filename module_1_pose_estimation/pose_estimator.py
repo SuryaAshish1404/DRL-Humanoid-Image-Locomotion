@@ -12,27 +12,45 @@ yolo_model = YOLO("yolov8n.pt")  # downloads automatically if missing
 mp_pose = mp.solutions.pose
 pose = mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5)
 
+MAIN_LANDMARKS = [
+    0,   # nose
+    11, 12,  # shoulders
+    13, 14,  # elbows
+    15, 16,  # wrists
+    23, 24,  # hips
+    25, 26,  # knees
+    27, 28,  # ankles
+    5, 6,    # eyes
+    7, 8,    # ears
+    9, 10,   # mouth corners
+    17, 18,  # index fingers
+    19, 20,  # pinky fingers
+    21, 22   # thumbs
+]
+
+
 # --- Functions ---
 def extract_skeleton(image_rgb):
     """
-    Extract a single person's 33 keypoints [x, y, confidence] using MediaPipe.
+    Extract a single person's reduced 25 keypoints [x, y, confidence] using MediaPipe.
     """
     results = pose.process(image_rgb)
     skeleton = []
 
     if results.pose_landmarks:
-        for lm in results.pose_landmarks.landmark:  # all 33 landmarks
-            skeleton.append([lm.x, lm.y, lm.visibility])
+        for idx, lm in enumerate(results.pose_landmarks.landmark):
+            if idx in MAIN_LANDMARKS:
+                skeleton.append([lm.x, lm.y, lm.visibility])
         skeleton = np.array(skeleton)
     else:
-        skeleton = np.zeros((33, 3))  # fallback if no pose detected
+        skeleton = np.zeros((len(MAIN_LANDMARKS), 3))  # fallback if no pose detected
 
     return skeleton
 
 
 def multi_person_skeletons(image_bgr):
     """
-    Detect multiple people and return list of skeletons [num_people, 33, 3].
+    Detect multiple people and return list of reduced skeletons [num_people, 25, 3].
     """
     results = yolo_model(image_bgr)[0]  # YOLO detections
     skeletons = []
@@ -62,22 +80,47 @@ def multi_person_skeletons(image_bgr):
 
 # --- Test the pipeline ---
 if __name__ == "__main__":
-    img_path = "../data/image_3.png"  # adjust your path
+    import os
+    import cv2
+    import numpy as np
+    from image_io import load_image_rgb
+
+    img_path = "../data/isl_13.jpg"  # adjust your path
     img_rgb = load_image_rgb(img_path)
+
+    # --- Detect if the image is truly grayscale ---
+    if np.allclose(img_rgb[:, :, 0], img_rgb[:, :, 1], atol=2) and np.allclose(img_rgb[:, :, 1], img_rgb[:, :, 2], atol=2):
+        print("⚙️ Detected grayscale image – enhancing contrast for better detection.")
+        gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+        img_rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+    else:
+        print("Detected color image – skipping grayscale enhancement.")
+
     img_bgr = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2BGR)
 
+    # --- Perform detection ---
     skeletons = multi_person_skeletons(img_bgr)
     print(f"Detected {len(skeletons)} people")
 
     for idx, sk in enumerate(skeletons):
-        print(f"Skeleton {idx} shape:", sk.shape)  # should be (33, 3)
+        print(f"Skeleton {idx} shape:", sk.shape)
         print(sk)
 
-    # --- Optional visualization ---
+    # --- Visualization ---
     for sk in skeletons:
         for x, y, _ in sk:
             cv2.circle(img_bgr, (int(x), int(y)), 3, (0, 255, 0), -1)
 
-    cv2.imshow("Multi-Person Pose", img_bgr)
+    # --- Save output image in ../outputs ---
+    os.makedirs("../outputs", exist_ok=True)
+    base_name = os.path.splitext(os.path.basename(img_path))[0]
+    output_path = os.path.join("../outputs", f"{base_name}_pose_estimator_output.jpg")
+    cv2.imwrite(output_path, img_bgr)
+    print(f"Output image saved as: {output_path}")
+
+    # --- Optional display ---
+    # cv2.imshow("Multi-Person Pose (Reduced 25 keypoints)", img_bgr)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
