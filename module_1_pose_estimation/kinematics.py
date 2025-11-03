@@ -131,7 +131,7 @@ def compute_joint_angles(skeleton):
     θ_shoulder_r = vector_angle(skeleton[R_SHOULDER], skeleton[R_ELBOW])
     θ_elbow_r = vector_angle(skeleton[R_ELBOW], skeleton[R_WRIST]) - θ_shoulder_r
 
-    θ_init = np.array([θ_hip_r, θ_knee_r, θ_hip_l, θ_knee_l, θ_shoulder_r, θ_elbow_r])
+    θ_init = np.array([θ_hip_r  , θ_knee_r, θ_hip_l, θ_knee_l, θ_shoulder_r, θ_elbow_r])
     return θ_init
 
 
@@ -143,7 +143,7 @@ if __name__ == "__main__":
     import numpy as np
     from image_io import load_image_rgb
 
-    img_path = "../data/isl_11.jpg"
+    img_path = "./data/image_1.png"
     img_rgb = load_image_rgb(img_path)
 
     # --- Detect if the image is truly grayscale ---
@@ -167,7 +167,12 @@ if __name__ == "__main__":
         print("No person detected!")
     else:
         θ_init = compute_joint_angles(main_skeleton)
-        print("Initial Pose Vector θ_init:", θ_init)
+        
+        # ✅ Print theta_init
+        print("--------------------------------------------------")
+        print("Computed Initial Pose Vector θ_init:")
+        print(θ_init)
+        print("--------------------------------------------------")
 
         # --- Visualization ---
         for x, y, _ in main_skeleton:

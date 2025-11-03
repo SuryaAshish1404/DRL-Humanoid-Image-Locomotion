@@ -85,7 +85,7 @@ if __name__ == "__main__":
     import numpy as np
     from image_io import load_image_rgb
 
-    img_path = "../data/isl_13.jpg"  # adjust your path
+    img_path = "../data/isl_11.jpg"  # adjust your path
     img_rgb = load_image_rgb(img_path)
 
     # --- Detect if the image is truly grayscale ---
