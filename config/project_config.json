@@ -1,0 +1,38 @@
+{
+  "paths": {
+    "yolo_weights": "yolov8n.pt",
+    "default_output_dir": "outputs",
+    "urdf_path": "module_2_simulation/assets/humanoid.urdf"
+  },
+  "pose_estimation": {
+    "min_detection_confidence": 0.5,
+    "bbox_padding": 12,
+    "grayscale_atol": 2,
+    "save_debug": true
+  },
+  "simulation": {
+    "gravity": -9.81,
+    "termination_height": 0.25,
+    "action_scale": 0.5,
+    "pose_filter_alpha": 0.2,
+    "default_hold_force": 200.0,
+    "settle_steps": 60
+  },
+  "controller": {
+    "hip_force": 600.0,
+    "knee_force": 600.0,
+    "shoulder_force": 250.0,
+    "elbow_force": 250.0,
+    "other_force": 180.0,
+    "hip_kp": 1.2,
+    "hip_kd": 0.2,
+    "knee_kp": 1.2,
+    "knee_kd": 0.2,
+    "shoulder_kp": 0.8,
+    "shoulder_kd": 0.12,
+    "elbow_kp": 0.8,
+    "elbow_kd": 0.12,
+    "other_kp": 0.6,
+    "other_kd": 0.1
+  }
+}

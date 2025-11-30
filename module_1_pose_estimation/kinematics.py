@@ -1,138 +1,82 @@
-import cv2
+"""Kinematic helpers to convert MediaPipe skeletons to humanoid joint angles."""
+
+from __future__ import annotations
+
+import math
+
 import numpy as np
 import mediapipe as mp
-from ultralytics import YOLO
-from image_io import load_image_rgb  # your existing image loader
 
-# --- Initialize models ---
-yolo_model = YOLO("yolov8n.pt")  # YOLOv8 tiny for fast person detection
+
 mp_pose = mp.solutions.pose
-pose = mp_pose.Pose(static_image_mode=True, min_detection_confidence=0.5)
 
-# --- Useful keypoint indices (25 main ones from 33) ---
-# Based on COCO-like subset (remove face & feet extras)
+# Body-25 subset we keep from MediaPipe's 33 landmarks
 MAIN_LANDMARKS = [
-    0,   # nose
-    11, 12,  # shoulders
-    13, 14,  # elbows
-    15, 16,  # wrists
-    23, 24,  # hips
-    25, 26,  # knees
-    27, 28,  # ankles
-    5, 6,    # eyes
-    7, 8,    # ears
-    9, 10,   # mouth corners (optional upper face)
-    17, 18,  # index fingers
-    19, 20,  # pinky fingers
-    21, 22   # thumbs
+    mp_pose.PoseLandmark.RIGHT_HIP.value,
+    mp_pose.PoseLandmark.RIGHT_KNEE.value,
+    mp_pose.PoseLandmark.RIGHT_ANKLE.value,
+    mp_pose.PoseLandmark.LEFT_HIP.value,
+    mp_pose.PoseLandmark.LEFT_KNEE.value,
+    mp_pose.PoseLandmark.LEFT_ANKLE.value,
+    mp_pose.PoseLandmark.RIGHT_SHOULDER.value,
+    mp_pose.PoseLandmark.RIGHT_ELBOW.value,
+    mp_pose.PoseLandmark.RIGHT_WRIST.value,
+    mp_pose.PoseLandmark.LEFT_SHOULDER.value,
+    mp_pose.PoseLandmark.LEFT_ELBOW.value,
+    mp_pose.PoseLandmark.LEFT_WRIST.value,
+]
+
+JOINT_NAMES = [
+    "right_hip",
+    "right_knee",
+    "left_hip",
+    "left_knee",
+    "right_shoulder",
+    "right_elbow",
 ]
 
 
-# --- Functions ---
+def _angle(p_a: np.ndarray, p_b: np.ndarray) -> float:
+    """Return planar angle between two points."""
 
-def extract_skeleton(image_rgb):
-    """
-    Extract selected 25 keypoints [x, y, visibility] using MediaPipe.
-    """
-    results = pose.process(image_rgb)
-    skeleton = []
-
-    if results.pose_landmarks:
-        for idx, lm in enumerate(results.pose_landmarks.landmark):
-            if idx in MAIN_LANDMARKS:
-                skeleton.append([lm.x, lm.y, lm.visibility])
-        skeleton = np.array(skeleton)
-    else:
-        skeleton = np.zeros((len(MAIN_LANDMARKS), 3))  # fallback
-
-    return skeleton
+    dx = p_b[0] - p_a[0]
+    dy = p_b[1] - p_a[1]
+    return math.atan2(dy, dx)
 
 
-def multi_person_skeletons(image_bgr):
-    """
-    Detect multiple people using YOLO and return list of reduced skeletons [num_people, 25, 3].
-    """
-    results = yolo_model(image_bgr)[0]
-    skeletons = []
-
-    for box, cls in zip(results.boxes.xyxy, results.boxes.cls):
-        if int(cls) != 0:  # only person
-            continue
-
-        x1, y1, x2, y2 = map(int, box)
-        person_crop = image_bgr[y1:y2, x1:x2]
-
-        if person_crop.size == 0:
-            continue
-
-        person_rgb = cv2.cvtColor(person_crop, cv2.COLOR_BGR2RGB)
-        sk = extract_skeleton(person_rgb)
-
-        # Convert normalized keypoints back to original image coordinates
-        sk[:, 0] = sk[:, 0] * (x2 - x1) + x1
-        sk[:, 1] = sk[:, 1] * (y2 - y1) + y1
-
-        skeletons.append(sk)
-
-    return skeletons
+def _clamp(value: float, lower: float, upper: float) -> float:
+    return max(lower, min(upper, value))
 
 
-def select_main_skeleton(skeletons):
-    """
-    Choose one skeleton among multiple: largest bounding box area.
-    """
-    if not skeletons:
-        return None
+def compute_joint_angles(skeleton: np.ndarray) -> np.ndarray:
+    """Return the six θ_init angles that drive the simplified humanoid."""
 
-    max_area = 0
-    main_sk = None
-
-    for sk in skeletons:
-        visible = sk[sk[:, 2] > 0.1]
-        if visible.size == 0:
-            continue
-
-        x_min, y_min = np.min(visible[:, 0]), np.min(visible[:, 1])
-        x_max, y_max = np.max(visible[:, 0]), np.max(visible[:, 1])
-        area = (x_max - x_min) * (y_max - y_min)
-
-        if area > max_area:
-            max_area = area
-            main_sk = sk
-
-    return main_sk
-
-
-def vector_angle(p1, p2):
-    dx, dy = p2[0] - p1[0], p2[1] - p1[1]
-    return np.arctan2(dy, dx)
-
-
-def compute_joint_angles(skeleton):
-    """
-    Convert reduced skeleton (25,3) to humanoid joint angles (θ_init).
-    Using mapped indices for MediaPipe subset.
-    """
-    # Mapping since we reduced points — use original indices for reference
     mp_idx = mp_pose.PoseLandmark
 
-    # Right leg
-    R_HIP, R_KNEE, R_ANKLE = MAIN_LANDMARKS.index(mp_idx.RIGHT_HIP.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_KNEE.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_ANKLE.value)
-    θ_hip_r = vector_angle(skeleton[R_HIP], skeleton[R_KNEE])
-    θ_knee_r = vector_angle(skeleton[R_KNEE], skeleton[R_ANKLE]) - θ_hip_r
+    def landmark_point(name: mp_pose.PoseLandmark) -> np.ndarray:
+        return skeleton[MAIN_LANDMARKS.index(name.value)]
 
-    # Left leg
-    L_HIP, L_KNEE, L_ANKLE = MAIN_LANDMARKS.index(mp_idx.LEFT_HIP.value), MAIN_LANDMARKS.index(mp_idx.LEFT_KNEE.value), MAIN_LANDMARKS.index(mp_idx.LEFT_ANKLE.value)
-    θ_hip_l = vector_angle(skeleton[L_HIP], skeleton[L_KNEE])
-    θ_knee_l = vector_angle(skeleton[L_KNEE], skeleton[L_ANKLE]) - θ_hip_l
+    DOWN = math.pi / 2
 
-    # Right arm
-    R_SHOULDER, R_ELBOW, R_WRIST = MAIN_LANDMARKS.index(mp_idx.RIGHT_SHOULDER.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_ELBOW.value), MAIN_LANDMARKS.index(mp_idx.RIGHT_WRIST.value)
-    θ_shoulder_r = vector_angle(skeleton[R_SHOULDER], skeleton[R_ELBOW])
-    θ_elbow_r = vector_angle(skeleton[R_ELBOW], skeleton[R_WRIST]) - θ_shoulder_r
+    hip_r_img = _angle(landmark_point(mp_idx.RIGHT_HIP), landmark_point(mp_idx.RIGHT_KNEE))
+    hip_l_img = _angle(landmark_point(mp_idx.LEFT_HIP), landmark_point(mp_idx.LEFT_KNEE))
+    knee_r = _angle(landmark_point(mp_idx.RIGHT_KNEE), landmark_point(mp_idx.RIGHT_ANKLE)) - hip_r_img
+    knee_l = _angle(landmark_point(mp_idx.LEFT_KNEE), landmark_point(mp_idx.LEFT_ANKLE)) - hip_l_img
+    hip_r = hip_r_img - DOWN
+    hip_l = DOWN - hip_l_img
 
-    θ_init = np.array([θ_hip_r  , θ_knee_r, θ_hip_l, θ_knee_l, θ_shoulder_r, θ_elbow_r])
-    return θ_init
+    shoulder_r_img = _angle(landmark_point(mp_idx.RIGHT_SHOULDER), landmark_point(mp_idx.RIGHT_ELBOW))
+    elbow_r = _angle(landmark_point(mp_idx.RIGHT_ELBOW), landmark_point(mp_idx.RIGHT_WRIST)) - shoulder_r_img
+    shoulder_r = shoulder_r_img - DOWN
+
+    hip_r = _clamp(hip_r, -1.2, 1.2)
+    hip_l = _clamp(hip_l, -1.2, 1.2)
+    knee_r = _clamp(knee_r, -0.1, 1.7)
+    knee_l = _clamp(knee_l, -0.1, 1.7)
+    shoulder_r = _clamp(shoulder_r, -1.5, 1.5)
+    elbow_r = _clamp(elbow_r, -1.0, 1.5)
+
+    return np.array([hip_r, knee_r, hip_l, knee_l, shoulder_r, elbow_r], dtype=np.float32)
 
 
 # --- Main pipeline ---
